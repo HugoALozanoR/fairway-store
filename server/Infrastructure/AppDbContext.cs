@@ -12,6 +12,7 @@ public class AppDbContext : DbContext
     public DbSet<User> Users => Set<User>();
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<OrderItem> OrderItems => Set<OrderItem>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -74,6 +75,18 @@ public class AppDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(i => i.ProductId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        b.Entity<RefreshToken>(e =>
+        {
+            e.Property(r => r.Token).IsRequired().HasMaxLength(200);
+            e.HasIndex(r => r.Token).IsUnique();
+            e.HasIndex(r => r.UserId);
+
+            e.HasOne(r => r.User)
+                .WithMany()
+                .HasForeignKey(r => r.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

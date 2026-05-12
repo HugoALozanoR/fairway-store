@@ -1,6 +1,8 @@
+using System.Security.Claims;
 using GolfTienda.Api.Application.Dtos;
 using GolfTienda.Api.Domain;
 using GolfTienda.Api.Infrastructure;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -15,6 +17,7 @@ public class OrdersController : ControllerBase
     public OrdersController(AppDbContext db) => _db = db;
 
     [HttpPost]
+    [AllowAnonymous]
     public async Task<ActionResult<OrderDto>> Create([FromBody] CreateOrderRequest request)
     {
         if (!ModelState.IsValid) return ValidationProblem(ModelState);
@@ -55,6 +58,7 @@ public class OrdersController : ControllerBase
 
         var order = new Order
         {
+            UserId = GetUserId(),
             CustomerName = request.CustomerName.Trim(),
             Email = request.Email.Trim(),
             ShippingAddress = request.ShippingAddress.Trim(),
@@ -88,10 +92,66 @@ public class OrdersController : ControllerBase
     }
 
     [HttpGet("{id:int}")]
+    [AllowAnonymous]
     public async Task<ActionResult<OrderDto>> GetById(int id)
     {
+        var order = await _db.Orders
+            .AsNoTracking()
+            .FirstOrDefaultAsync(o => o.Id == id);
+        if (order is null) return NotFound();
+
+        if (order.UserId is not null)
+        {
+            var userId = GetUserId();
+            var isAdmin = User.IsInRole(UserRoles.Admin);
+            if (!isAdmin && (userId is null || userId.Value != order.UserId.Value))
+            {
+                return Forbid();
+            }
+        }
+
         var dto = await LoadOrderDto(id);
         return dto is null ? NotFound() : Ok(dto);
+    }
+
+    [HttpGet("me")]
+    [Authorize]
+    public async Task<ActionResult<IReadOnlyList<OrderDto>>> MyOrders()
+    {
+        var userId = GetUserId();
+        if (userId is null) return Unauthorized();
+
+        var orders = await _db.Orders
+            .Where(o => o.UserId == userId.Value)
+            .OrderByDescending(o => o.CreatedAt)
+            .Select(o => new OrderDto
+            {
+                Id = o.Id,
+                CustomerName = o.CustomerName,
+                Email = o.Email,
+                ShippingAddress = o.ShippingAddress,
+                Total = o.Total,
+                Status = o.Status,
+                CreatedAt = o.CreatedAt,
+                Items = o.Items.Select(i => new OrderItemDto
+                {
+                    ProductId = i.ProductId,
+                    ProductName = i.Product!.Name,
+                    ProductSlug = i.Product!.Slug,
+                    ImageFileName = i.Product!.ImageFileName,
+                    UnitPrice = i.UnitPrice,
+                    Quantity = i.Quantity,
+                }).ToList(),
+            })
+            .ToListAsync();
+
+        return Ok(orders);
+    }
+
+    private int? GetUserId()
+    {
+        var raw = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        return int.TryParse(raw, out var id) ? id : null;
     }
 
     private async Task<OrderDto?> LoadOrderDto(int id)
