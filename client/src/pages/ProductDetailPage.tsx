@@ -1,16 +1,25 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Minus, Plus, ShoppingBag } from "lucide-react";
+import { Check, Minus, Plus, ShoppingBag } from "lucide-react";
 import { useProduct } from "../hooks/useProduct";
 import { ProductImage } from "../components/product/ProductImage";
 import { Breadcrumbs } from "../components/ui/Breadcrumbs";
 import { Skeleton } from "../components/ui/Skeleton";
 import { formatPrice } from "../lib/format";
+import { useCartStore } from "../stores/cartStore";
 
 export function ProductDetailPage() {
   const { slug } = useParams<{ slug: string }>();
   const { data: product, isLoading, isError } = useProduct(slug);
   const [quantity, setQuantity] = useState(1);
+  const [justAdded, setJustAdded] = useState(false);
+  const addItem = useCartStore((s) => s.addItem);
+  const openDrawer = useCartStore((s) => s.openDrawer);
+  const cartItems = useCartStore((s) => s.items);
+
+  const cartQty = product
+    ? cartItems.find((i) => i.productId === product.id)?.quantity ?? 0
+    : 0;
 
   if (isLoading) {
     return (
@@ -50,7 +59,28 @@ export function ProductDetailPage() {
 
   const outOfStock = product.stock <= 0;
   const lowStock = !outOfStock && product.stock <= 5;
-  const max = Math.max(1, product.stock);
+  const remaining = Math.max(0, product.stock - cartQty);
+  const max = Math.max(1, remaining);
+  const reachedLimit = !outOfStock && remaining <= 0;
+
+  const handleAdd = () => {
+    if (outOfStock || reachedLimit) return;
+    addItem(
+      {
+        productId: product.id,
+        slug: product.slug,
+        name: product.name,
+        price: product.price,
+        imageFileName: product.imageFileName,
+        stock: product.stock,
+      },
+      Math.min(quantity, remaining)
+    );
+    setJustAdded(true);
+    openDrawer();
+    setQuantity(1);
+    window.setTimeout(() => setJustAdded(false), 1600);
+  };
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
@@ -108,7 +138,7 @@ export function ProductDetailPage() {
               <button
                 type="button"
                 onClick={() => setQuantity((q) => Math.max(1, q - 1))}
-                disabled={outOfStock || quantity <= 1}
+                disabled={outOfStock || reachedLimit || quantity <= 1}
                 className="flex h-11 w-11 items-center justify-center text-charcoal-600 disabled:opacity-40"
                 aria-label="Decrease quantity"
               >
@@ -120,7 +150,7 @@ export function ProductDetailPage() {
               <button
                 type="button"
                 onClick={() => setQuantity((q) => Math.min(max, q + 1))}
-                disabled={outOfStock || quantity >= max}
+                disabled={outOfStock || reachedLimit || quantity >= max}
                 className="flex h-11 w-11 items-center justify-center text-charcoal-600 disabled:opacity-40"
                 aria-label="Increase quantity"
               >
@@ -130,14 +160,34 @@ export function ProductDetailPage() {
 
             <button
               type="button"
-              disabled={outOfStock}
+              onClick={handleAdd}
+              disabled={outOfStock || reachedLimit}
               className="inline-flex h-11 items-center gap-2 rounded-md bg-fairway-700 px-6 text-sm font-medium text-white transition hover:bg-fairway-800 disabled:cursor-not-allowed disabled:bg-charcoal-300"
-              title={outOfStock ? "Out of stock" : "Add to cart (coming soon)"}
             >
-              <ShoppingBag className="h-4 w-4" />
-              Add to cart
+              {justAdded ? (
+                <>
+                  <Check className="h-4 w-4" />
+                  Added to cart
+                </>
+              ) : (
+                <>
+                  <ShoppingBag className="h-4 w-4" />
+                  {reachedLimit ? "Max in cart" : "Add to cart"}
+                </>
+              )}
             </button>
           </div>
+
+          {cartQty > 0 && !reachedLimit && (
+            <p className="mt-3 text-xs text-charcoal-500">
+              Already in your cart: {cartQty}
+            </p>
+          )}
+          {reachedLimit && !outOfStock && (
+            <p className="mt-3 text-xs text-charcoal-500">
+              You have all available stock in your cart.
+            </p>
+          )}
 
           <p className="mt-6 text-xs text-charcoal-400">
             Free shipping on orders over $150 · 30-day returns
